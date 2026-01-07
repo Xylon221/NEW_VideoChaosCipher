@@ -4,7 +4,8 @@ project(VideoChaosCipher CXX)
 # 查找 OpenCV 库
 find_package(OpenCV REQUIRED)
 
-add_executable(app src/main.cpp)
+add_executable(app src/main.cpp
+                   src/encryptor.cpp)
 
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 11)

@@ -3,7 +3,8 @@
 #include <random>
 #include <chrono>
 #include <thread>
-
+#include <vector>
+#include "/home/orangepi/Work/VideoChaosCipher/include/encryptor.h"
 #include "/home/orangepi/Work/VideoChaosCipher/include/SafeQueue.h"
 
 struct FrameData
@@ -39,23 +40,8 @@ bool openVideoFile(const std::string &path, cv::VideoCapture &cap) {
     return true;
 }
 
-void encryptFrame(cv::Mat &frame) {
-    CV_Assert(frame.type() == CV_8UC3);
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_int_distribution<uint8_t> dist(0, 255);
-    
-    for (int y = 0; y < frame.rows; ++y) {
-        uint8_t *row = frame.ptr<uint8_t>(y);
-        for (int x = 0; x < frame.cols * 3; ++x) {
-            row[x] ^= dist(rng);
-        }
-    }
-}
-
-// Video reading thread
-// It reads frames from cap, and pushes them to the readQueue.
 void readerThread(cv::VideoCapture &cap, SafeQueue<FrameData> &readQueue) {
-    
+    std::cout << "Read started." << std::endl;
     int index = 0;
    FrameData data;
     while (true) {
@@ -74,24 +60,31 @@ void readerThread(cv::VideoCapture &cap, SafeQueue<FrameData> &readQueue) {
 // get frame from readQueue, encrypt them, then push them into writeQueue
 void encryptThread(SafeQueue<FrameData> &readQueue, SafeQueue<FrameData> &writeQueue, 
                   int start_idx, int end_idx) {
+    std::cout << "Encrypt video started." << std::endl;                
     FrameData data;
-    
+    int index = 0;
     while (readQueue.pop(data)) {
         if (data.frame_index >= start_idx && data.frame_index <= end_idx) {
             encryptFrame(data.frame);
+            index++;
         }
         writeQueue.push(data);
+        
     }
+    std::cout << "Encrypt finished, totally encrypt " << index << " frame" << std::endl;
 }
 
 // Video writing thread
 // It gets the frames from the writeQueue and writes them to VideoWriter
 void writerThread(cv::VideoWriter &writer, SafeQueue<FrameData> &writeQueue) {
+    std::cout << "Read started." << std::endl;
     FrameData data;
-    
+    int index = 0;
     while (writeQueue.pop(data)) {
         writer.write(data.frame);
+        index++;
     }
+    std::cout << "Write finished, totally write " << index << " frame" << std::endl;
 }
 
 bool processVideo(const std::string &input_path, const std::string &output_path) {
