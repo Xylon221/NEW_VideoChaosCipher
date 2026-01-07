@@ -10,22 +10,6 @@ struct FrameData
 {
     cv::Mat frame;
     int frame_index;
-    
-    // 添加拷贝构造函数，确保深度拷贝
-    FrameData() = default;
-    FrameData(const FrameData& other) 
-        : frame_index(other.frame_index)
-    {
-        other.frame.copyTo(frame);  // 深度拷贝
-    }
-    
-    FrameData& operator=(const FrameData& other) {
-        if (this != &other) {
-            frame_index = other.frame_index;
-            other.frame.copyTo(frame);  // 深度拷贝
-        }
-        return *this;
-    }
 };
 
 void printVideoInfo(cv::VideoCapture &cap) {
@@ -39,17 +23,17 @@ void printVideoInfo(cv::VideoCapture &cap) {
     double fps = cap.get(cv::CAP_PROP_FPS);
     int framecount = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
     
-    std::cout << "视频信息:" << std::endl;
-    std::cout << " 分辨率: " << width << "x" << height << std::endl;
-    std::cout << " 帧率: " << fps << " FPS" << std::endl;
-    std::cout << " 总帧数: " << framecount << std::endl;
+    std::cout << "Original Video Intro:" << std::endl;
+    std::cout << " Resolution: " << width << "x" << height << std::endl;
+    std::cout << " FPS: " << fps  << std::endl;
+    std::cout << " Total frames: " << framecount << std::endl;
 }
 
 bool openVideoFile(const std::string &path, cv::VideoCapture &cap) {
     cap.open(path);
     if (!cap.isOpened()) {
-        std::cout << "错误: 无法打开视频文件" << std::endl;
-        std::cout << "路径: " << path << std::endl;
+        std::cout << "ERROR: Failed to open Video." << std::endl;
+        std::cout << "PATH: " << path << std::endl;
         return false;
     }
     return true;
@@ -71,14 +55,19 @@ void encryptFrame(cv::Mat &frame) {
 // Video reading thread
 // It reads frames from cap, and pushes them to the readQueue.
 void readerThread(cv::VideoCapture &cap, SafeQueue<FrameData> &readQueue) {
-    FrameData data;
-    int index = 0;
     
-    while (cap.read(data.frame)) {
+    int index = 0;
+   FrameData data;
+    while (true) {
+        FrameData data;
+        if( !cap.read(data.frame)){
+            break; 
+        }
         data.frame_index = index++;
         readQueue.push(data);
     }
     readQueue.setFinished();
+    std::cout << "Read finished, totally read " << index << " frame" << std::endl;
 }
 
 // Encrypt Thread
@@ -119,7 +108,7 @@ bool processVideo(const std::string &input_path, const std::string &output_path)
     double fps = cap.get(cv::CAP_PROP_FPS);
     
     if (fps <= 0) {
-        std::cerr << "错误: 无效帧率" << std::endl;
+        std::cerr << "ERROR: Invalid FPS" << std::endl;
         return false;
     }
     
@@ -159,8 +148,8 @@ bool processVideo(const std::string &input_path, const std::string &output_path)
 }
 
 int main() {
-    std::cout << "程序启动" << std::endl;
-    std::cout << "OpenCV 版本: " << CV_VERSION << std::endl;
+    std::cout << "Program start." << std::endl;
+    std::cout << "OpenCV Version: " << CV_VERSION << std::endl;
     
     std::string input_video = "/home/orangepi/Work/CHAPT1/test_video.mp4";
     std::string output_video = "/home/orangepi/Work/VideoChaosCipher/output_video.mp4";
@@ -168,7 +157,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     
     if (!processVideo(input_video, output_video)) {
-        std::cerr << "视频转换失败" << std::endl;
+        std::cerr << "Video process failed." << std::endl;
         return -1;
     }
     
@@ -176,7 +165,7 @@ int main() {
     auto time_span_s = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Time span: " << time_span_s.count() << "ms\n";
     
-    std::cout << "视频转换完成" << std::endl;
+    std::cout << "Video process finished." << std::endl;
     
     return 0;
 }
