@@ -1,18 +1,21 @@
-# Google Test 自动下载
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.14.0
-)
-FetchContent_MakeAvailable(googletest)
+# 优先使用系统安装的 GTest，未安装时自动从 GitHub 下载
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 enable_testing()
+include(GoogleTest)
 
-# 公共头文件路径
+# 公共头文件搜索路径
 set(TEST_INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
 )
 
 # ---- test_encryptor ----

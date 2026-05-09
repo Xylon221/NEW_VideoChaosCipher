@@ -1,4 +1,4 @@
-#include "/home/orangepi/Work/VideoChaosCipher/include/encryptor.h"
+#include "encryptor.h"
 
 // Logistic map 混沌映射函数
 float logisticMap(float x, float r) {

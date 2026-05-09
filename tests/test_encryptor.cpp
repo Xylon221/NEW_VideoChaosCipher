@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <opencv2/opencv.hpp>
-#include "/home/orangepi/Work/VideoChaosCipher/include/encryptor.h"
+#include "encryptor.h"
 
 // 构造一张纯色测试图
 static cv::Mat makeSolidImage(int w, int h, uchar b, uchar g, uchar r) {

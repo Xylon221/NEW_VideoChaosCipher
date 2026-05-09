@@ -1,4 +1,4 @@
-#include "/home/orangepi/Work/VideoChaosCipher/include/analyzer.h"
+#include "analyzer.h"
 #include <cmath>
 #include <vector>
 #include <iostream>

@@ -8,8 +8,8 @@
 #include <atomic>
 #include <map>
 #include <iomanip>
-#include "/home/orangepi/Work/VideoChaosCipher/include/encryptor.h"
-#include "/home/orangepi/Work/VideoChaosCipher/include/SafeQueue.h"
+#include "encryptor.h"
+#include "SafeQueue.h"
 
 struct FrameData
 {

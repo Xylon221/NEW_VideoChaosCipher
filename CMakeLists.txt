@@ -26,9 +26,10 @@ add_executable(app
     src/analyzer.cpp
 )
 
-# 单帧测试程序
+# 单帧加密演示工具
 add_executable(test_frame
-    src/test_encryptFrame.cpp
+    tools/encrypt_single_frame.cpp
+    src/analyzer.cpp
 )
 
 # 链接 OpenCV

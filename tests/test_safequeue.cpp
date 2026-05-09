@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
-#include "/home/orangepi/Work/VideoChaosCipher/include/SafeQueue.h"
+#include "SafeQueue.h"
 
 // 基本的 push/pop 测试
 TEST(SafeQueueTest, PushPop) {
