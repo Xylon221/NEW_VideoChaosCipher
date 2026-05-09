@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <cstdlib>
 #include "/home/orangepi/Work/VideoChaosCipher/include/encryptor.h"
 #include "/home/orangepi/Work/VideoChaosCipher/include/SafeQueue.h"
 
@@ -58,18 +59,19 @@ void readerThread(cv::VideoCapture &cap, SafeQueue<FrameData> &readQueue) {
 
 // Encrypt Thread
 // get frame from readQueue, encrypt them, then push them into writeQueue
-void encryptThread(SafeQueue<FrameData> &readQueue, SafeQueue<FrameData> &writeQueue, 
-                  int start_idx, int end_idx) {
-    std::cout << "Encrypt video started." << std::endl;                
+// seed: 混沌加密种子，同一 seed 加密/解密结果一致
+void encryptThread(SafeQueue<FrameData> &readQueue, SafeQueue<FrameData> &writeQueue,
+                  int start_idx, int end_idx, float seed) {
+    std::cout << "Encrypt video started." << std::endl;
     FrameData data;
     int index = 0;
     while (readQueue.pop(data)) {
         if (data.frame_index >= start_idx && data.frame_index <= end_idx) {
-            encryptFrame(data.frame);
+            encryptFrame(data.frame, seed);
             index++;
         }
         writeQueue.push(data);
-        
+
     }
     std::cout << "Encrypt finished, totally encrypt " << index << " frame" << std::endl;
 }
@@ -87,7 +89,11 @@ void writerThread(cv::VideoWriter &writer, SafeQueue<FrameData> &writeQueue) {
     std::cout << "Write finished, totally write " << index << " frame" << std::endl;
 }
 
-bool processVideo(const std::string &input_path, const std::string &output_path) {
+// start_sec: 开始加密的时间（秒）
+// end_sec:   结束加密的时间（秒）
+// seed:      混沌加密种子
+bool processVideo(const std::string &input_path, const std::string &output_path,
+                  float start_sec, float end_sec, float seed) {
     cv::VideoCapture cap(input_path);
     if (!cap.isOpened()) {
         std::cerr << "Failed to open the input video:" << input_path << std::endl;
@@ -119,13 +125,14 @@ bool processVideo(const std::string &input_path, const std::string &output_path)
     
 
     SafeQueue<FrameData> readQueue, writeQueue;
-    int start_idx = static_cast<int>(2.0 * fps);
-    int end_idx = static_cast<int>(4.0 * fps);
+    // 根据时间参数计算帧索引范围
+    int start_idx = static_cast<int>(start_sec * fps);
+    int end_idx = static_cast<int>(end_sec * fps);
     
     // 启动所有线程
     std::thread reader(readerThread, std::ref(cap), std::ref(readQueue));
-    std::thread encryptor(encryptThread, std::ref(readQueue), std::ref(writeQueue), 
-                          start_idx, end_idx);
+    std::thread encryptor(encryptThread, std::ref(readQueue), std::ref(writeQueue),
+                          start_idx, end_idx, seed);
     std::thread writerT(writerThread, std::ref(writer), std::ref(writeQueue));
     
     // 等待并同步
@@ -140,25 +147,48 @@ bool processVideo(const std::string &input_path, const std::string &output_path)
     return true;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     std::cout << "Program start." << std::endl;
     std::cout << "OpenCV Version: " << CV_VERSION << std::endl;
-    
-    std::string input_video = "/home/orangepi/Work/CHAPT1/test_video.mp4";
-    std::string output_video = "/home/orangepi/Work/VideoChaosCipher/output_video.mp4";
-    
+
+    // ---------- 解析命令行参数 ----------
+    // 用法: ./app <输入视频> <输出视频> [开始秒数] [结束秒数] [种子值]
+    if (argc < 3) {
+        std::cout << "用法: " << argv[0]
+                  << " <输入视频> <输出视频> [开始秒数] [结束秒数] [种子值]"
+                  << std::endl;
+        std::cout << "示例: " << argv[0]
+                  << " input.mp4 output.mp4 2.0 4.0 0.5"
+                  << std::endl;
+        return -1;
+    }
+
+    std::string input_video  = argv[1];
+    std::string output_video = argv[2];
+
+    // 可选参数，未提供时使用默认值
+    float start_sec = (argc >= 4) ? std::atof(argv[3]) : 2.0f;
+    float end_sec   = (argc >= 5) ? std::atof(argv[4]) : 4.0f;
+    float seed      = (argc >= 6) ? std::atof(argv[5]) : 0.5f;
+
+    std::cout << "输入视频: " << input_video << std::endl;
+    std::cout << "输出视频: " << output_video << std::endl;
+    std::cout << "加密范围: " << start_sec << "s ~ " << end_sec << "s" << std::endl;
+    std::cout << "加密种子: " << seed << std::endl;
+
+    // ---------- 处理视频 ----------
     auto start = std::chrono::high_resolution_clock::now();
-    
-    if (!processVideo(input_video, output_video)) {
+
+    if (!processVideo(input_video, output_video, start_sec, end_sec, seed)) {
         std::cerr << "Video process failed." << std::endl;
         return -1;
     }
-    
+
     auto end = std::chrono::high_resolution_clock::now();
     auto time_span_s = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Time span: " << time_span_s.count() << "ms\n";
-    
+
     std::cout << "Video process finished." << std::endl;
-    
+
     return 0;
 }
