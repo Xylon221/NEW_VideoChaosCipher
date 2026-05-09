@@ -2,6 +2,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <random>
+#include "/home/orangepi/Work/VideoChaosCipher/include/analyzer.h"
 
 struct FrameData
 {
@@ -64,6 +65,9 @@ int main() {
         return -1;
     }
 
+    // 保存原始图像副本用于对比分析
+    cv::Mat original = image.clone();
+
     // 对图片进行混沌加密
     chaosEncrypt(image);
 
@@ -71,5 +75,9 @@ int main() {
     cv::imwrite("/home/orangepi/Work/VideoChaosCipher/encrypted_frame10.jpg", image);
 
     std::cout << "加密后的图片已保存。" << std::endl;
+
+    // 打印加密质量评估报告
+    printQualityReport(original, image);
+
     return 0;
 }

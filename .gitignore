@@ -1,3 +1,35 @@
+# Build artifacts
 build/
-output_video.mp4
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+
+# Executables (built binaries, keep in build/ only)
+*.exe
+*.out
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test outputs
+Testing/
+CTestTestfile.cmake
+DartConfiguration.tcl
+
+# Project specific (media files)
+*.mp4
+*.avi
+*.mov
+*.mkv
+encrypted_*.jpg
+output_*

@@ -28,9 +28,21 @@ public:
         cv_.notify_all();
     }
 
+    // 查询队列当前元素个数（非阻塞，瞬时值）
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(m_);
+        return q_.size();
+    }
+
+    // 查询队列是否已被标记为结束
+    bool isFinished() const {
+        std::lock_guard<std::mutex> lock(m_);
+        return finished_;
+    }
+
 private:
     std::queue<T> q_;
-    std::mutex m_;
+    mutable std::mutex m_;
     std::condition_variable cv_;
     bool finished_ = false;
 };
