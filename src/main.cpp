@@ -10,6 +10,7 @@
 #include <iomanip>
 #include "encryptor.h"
 #include "SafeQueue.h"
+#include "vpu_io.h"
 
 struct FrameData
 {
@@ -32,26 +33,25 @@ struct BenchStats
     double writerTimeMs  = 0;
 };
 
-void printVideoInfo(cv::VideoCapture &cap) {
-    if (!cap.isOpened()) {
+void printVideoInfo(VPUDecoder &dec) {
+    if (!dec.isOpened()) {
         std::cout << "错误: 视频未打开" << std::endl;
         return;
     }
-    
-    int width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-    int height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
-    double fps = cap.get(cv::CAP_PROP_FPS);
-    int framecount = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
-    
+
+    int width = dec.getWidth();
+    int height = dec.getHeight();
+    double fps = dec.getFPS();
+    int framecount = dec.getFrameCount();
+
     std::cout << "Original Video Intro:" << std::endl;
     std::cout << " Resolution: " << width << "x" << height << std::endl;
     std::cout << " FPS: " << fps  << std::endl;
     std::cout << " Total frames: " << framecount << std::endl;
 }
 
-bool openVideoFile(const std::string &path, cv::VideoCapture &cap) {
-    cap.open(path);
-    if (!cap.isOpened()) {
+bool openVideoFile(const std::string &path, VPUDecoder &dec) {
+    if (!dec.open(path)) {
         std::cout << "ERROR: Failed to open Video." << std::endl;
         std::cout << "PATH: " << path << std::endl;
         return false;
@@ -59,13 +59,13 @@ bool openVideoFile(const std::string &path, cv::VideoCapture &cap) {
     return true;
 }
 
-void readerThread(cv::VideoCapture &cap, SafeQueue<FrameData> &readQueue,
+void readerThread(VPUDecoder &dec, SafeQueue<FrameData> &readQueue,
                    BenchStats &stats) {
     std::cout << "Read started." << std::endl;
     int index = 0;
     while (true) {
         FrameData data;
-        if (!cap.read(data.frame)) {
+        if (!dec.read(data.frame)) {
             break;
         }
         data.frame_index = index++;
@@ -115,7 +115,7 @@ void encryptThread(SafeQueue<FrameData> &readQueue, SafeQueue<FrameData> &writeQ
 
 // Video writing thread (带乱序重排缓冲)
 // 多加密线程可能导致帧乱序到达，使用 std::map 按 frame_index 排序后顺序写入
-void writerThread(cv::VideoWriter &writer, SafeQueue<FrameData> &writeQueue,
+void writerThread(VPUEncoder &writer, SafeQueue<FrameData> &writeQueue,
                   BenchStats &stats) {
     std::cout << "Write started." << std::endl;
 
@@ -155,31 +155,25 @@ void writerThread(cv::VideoWriter &writer, SafeQueue<FrameData> &writeQueue,
 // numThreads: 加密线程数
 bool processVideo(const std::string &input_path, const std::string &output_path,
                   float start_sec, float end_sec, float seed, int numThreads) {
-    cv::VideoCapture cap(input_path);
-    if (!cap.isOpened()) {
+    VPUDecoder dec;
+    if (!dec.open(input_path)) {
         std::cerr << "Failed to open the input video:" << input_path << std::endl;
         return false;
     }
 
-    printVideoInfo(cap);
+    printVideoInfo(dec);
 
-    int width  = cap.get(cv::CAP_PROP_FRAME_WIDTH);
-    int height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-    double fps = cap.get(cv::CAP_PROP_FPS);
+    int width  = dec.getWidth();
+    int height = dec.getHeight();
+    double fps = dec.getFPS();
 
     if (fps <= 0) {
         std::cerr << "ERROR: Invalid FPS" << std::endl;
         return false;
     }
 
-    cv::VideoWriter writer(
-        output_path,
-        cv::VideoWriter::fourcc('a', 'v', 'c', '1'),
-        fps,
-        cv::Size(width, height)
-    );
-
-    if (!writer.isOpened()) {
+    VPUEncoder writer;
+    if (!writer.open(output_path, width, height, fps)) {
         std::cerr << "Failed to open the output video:" << output_path << std::endl;
         return false;
     }
@@ -194,7 +188,7 @@ bool processVideo(const std::string &input_path, const std::string &output_path,
 
     // --- 启动 reader ---
     auto t_reader_start = std::chrono::high_resolution_clock::now();
-    std::thread reader(readerThread, std::ref(cap), std::ref(readQueue),
+    std::thread reader(readerThread, std::ref(dec), std::ref(readQueue),
                        std::ref(stats));
 
     // --- 启动 N 个 encryptor ---
@@ -235,7 +229,7 @@ bool processVideo(const std::string &input_path, const std::string &output_path,
                              t_writer_end - t_total_start).count();
 
     // ---------- 输出性能报告 ----------
-    int totalFrames = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+    int totalFrames = dec.getFrameCount();
     int encryptedFrames = stats.totalFramesEncrypted.load();
     double throughputFps = (totalTimeMs > 0)
                            ? (totalFrames / totalTimeMs * 1000.0) : 0;
@@ -274,7 +268,7 @@ bool processVideo(const std::string &input_path, const std::string &output_path,
               << " frames\n";
     std::cout << "========================================================\n\n";
 
-    cap.release();
+    dec.release();
     writer.release();
 
     return true;
