@@ -35,6 +35,9 @@ add_executable(app
     src/encryptor.cpp
     src/analyzer.cpp
     src/vpu_io.cpp
+    src/reader.cpp
+    src/writer.cpp
+    src/pipeline.cpp
 )
 
 # 单帧加密演示工具

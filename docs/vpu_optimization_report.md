@@ -140,8 +140,15 @@ readQueue 峰值深度 = 1-2 → 瓶颈已部分从 Reader 转移到 Writer
 |------|---------|------|
 | `include/vpu_io.h` | 新增 | VPUDecoder / VPUEncoder 类声明 |
 | `src/vpu_io.cpp` | 新增 | FFmpeg 视频 I/O 实现（SW 解码/编码 + HW 自动探测/回退） |
-| `src/main.cpp` | 修改 | `cv::VideoCapture` → `VPUDecoder`, `cv::VideoWriter` → `VPUEncoder` |
-| `CMakeLists.txt` | 修改 | 添加 `PkgConfig` 查找 libavcodec/format/util/swscale 并链接 |
+| `include/stats.h` | 新增 | FrameData + BenchStats 数据结构 |
+| `include/reader.h` | 新增 | readerThread 声明 |
+| `include/writer.h` | 新增 | writerThread 声明（含乱序重排） |
+| `include/pipeline.h` | 新增 | encryptThread + processVideo 声明 |
+| `src/reader.cpp` | 新增 | 帧读取线程实现 |
+| `src/writer.cpp` | 新增 | 帧写入线程实现（含 std::map 重排缓冲） |
+| `src/pipeline.cpp` | 新增 | 加密线程 + processVideo 流程编排 + 性能报告 |
+| `src/main.cpp` | 修改 | 参数解析精简至 ~50 行；`cv::VideoCapture` → `VPUDecoder`, `cv::VideoWriter` → `VPUEncoder` |
+| `CMakeLists.txt` | 修改 | 添加 `PkgConfig` 查找 libavcodec/format/util/swscale；添加新源文件 |
 
 ---
 

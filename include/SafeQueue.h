@@ -1,3 +1,6 @@
+#ifndef SAFEQUEUE_H
+#define SAFEQUEUE_H
+
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -46,3 +49,5 @@ private:
     std::condition_variable cv_;
     bool finished_ = false;
 };
+
+#endif
