@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build-wsl/
 cmake-build-*/
 *.o
 *.obj

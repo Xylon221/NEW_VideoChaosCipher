@@ -99,3 +99,36 @@ TEST(SafeQueueTest, MultipleConsumers) {
     EXPECT_EQ(totalCnt, N);
     EXPECT_EQ(totalSum, N * (N - 1) / 2);
 }
+
+
+// 有界队列应对 producer 施加背压，消费者取走元素后 producer 才能继续。
+TEST(SafeQueueTest, BoundedQueueAppliesBackPressure) {
+    SafeQueue<int> q(1);
+    std::atomic<bool> secondPushReturned{false};
+
+    std::thread producer([&]() {
+        EXPECT_TRUE(q.push(1));
+        EXPECT_TRUE(q.push(2));
+        secondPushReturned = true;
+        q.setFinished();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_FALSE(secondPushReturned.load());
+
+    int value = 0;
+    EXPECT_TRUE(q.pop(value));
+    EXPECT_EQ(value, 1);
+
+    producer.join();
+    EXPECT_TRUE(secondPushReturned.load());
+    EXPECT_TRUE(q.pop(value));
+    EXPECT_EQ(value, 2);
+    EXPECT_FALSE(q.pop(value));
+}
+
+TEST(SafeQueueTest, PushAfterFinishedFails) {
+    SafeQueue<int> q(1);
+    q.setFinished();
+    EXPECT_FALSE(q.push(1));
+}
