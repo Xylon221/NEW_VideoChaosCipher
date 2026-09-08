@@ -1,172 +1,110 @@
-# VPU 硬件加速优化报告
+# 视频 I/O 与 VPU 优化验证报告
 
-## 概述
+> 本文用于记录当前优化状态和后续上板实测结果。旧文档中的固定性能数字只作为历史记录，不能直接作为当前版本的最终结论。当前版本应以重新运行 benchmark 后的数据为准。
 
-将 VideoChaosCipher 视频 I/O 层从 OpenCV 的 `cv::VideoCapture` / `cv::VideoWriter`（底层 libx264 软件编解码）替换为 FFmpeg API 直调方案，尝试启用 RK3588 VPU 硬件加速（rkmpp），在实际硬件不可用时自动回退到 FFmpeg 软件编解码（ARM NEON + 多线程）。整体管线吞吐量提升约 **1.8 倍**。
+## 1. 当前结论
 
-- **分支**: `feature/vpu-ffmpeg-accel`
-- **平台**: Orange Pi 5 (Rockchip RK3588)
-- **日期**: 2026-05-14
+代码层面已经完成从 OpenCV Video I/O 到 FFmpeg API 封装的升级，并实现了硬件优先、软件回退的编解码器选择策略。目标架构是：VPU 承担视频编解码，CPU 承担加密计算。
 
----
+需要注意：
 
-## 平台环境
+- WSL/x86 环境没有 RK3588 VPU，因此只能验证软件回退、线程流水线和算法正确性。
+- RK3588 上是否真正使用 VPU，要看运行日志中的 `HW=yes/no`，以及 FFmpeg 是否提供 rkmpp/v4l2m2m 编解码器。
+- 历史报告中约 1.8x 的提升来自早期 FFmpeg 软件路径相对 OpenCV 路径的对比，当前升级后需要重新测试。
 
-| 项目 | 信息 |
-|------|------|
-| 开发板 | Orange Pi 5 |
-| SoC | Rockchip RK3588 (4×A76 + 4×A55) |
-| 内存 | 7.8 GB |
-| 内核 | Linux 5.10.160-rockchip-rk3588 |
-| 编译器 | g++ 11.4.0 (ARMv8) |
-| OpenCV | 4.5.4 |
-| FFmpeg | 4.4.2 (编译了 rkmpp / v4l2m2m 支持) |
-| MPP | librockchip_mpp.so.1 (已安装) |
-| VPU 设备 | `/dev/video-dec0`, `/dev/video-enc0`, `/dev/mpp_service`, `/dev/rga` |
+## 2. 已完成改造
 
----
+| 改造项 | 状态 | 说明 |
+| --- | --- | --- |
+| FFmpeg 解码封装 | 已完成 | `VPUDecoder` 使用 FFmpeg 打开文件或 v4l2 摄像头 |
+| FFmpeg 编码封装 | 已完成 | `VPUEncoder` 写 H.264 输出，维护 time_base 和 PTS |
+| 硬件优先选择 | 已完成 | 优先尝试 rkmpp/v4l2m2m，失败自动回退软件路径 |
+| 多线程加密 | 已完成 | Reader + N Encryptor + Writer |
+| 有界队列背压 | 已完成 | `-q` 可配置容量，避免内存无限增长 |
+| 运行统计 | 已完成 | 统计 decoded/encrypted/written、FPS、队列峰值 |
+| 单元测试 | 已完成 | 当前 15 个测试通过 |
+| RK3588 实机性能数据 | 待补充 | 需要上板重新采集 |
 
-## 架构变更
+## 3. 本地 WSL 验证结果
 
-```
-Before (Master):
-  cv::VideoCapture (libx264 SW decode)
-       → cv::Mat → encryptFrame → cv::Mat
-       → cv::VideoWriter (libx264 SW encode)
+已验证内容：
 
-After (Feature):
-  FFmpeg avcodec (SW decode, 多线程+NEON)
-       → sws_scale (YUV→BGR) → cv::Mat → encryptFrame → cv::Mat
-       → sws_scale (BGR→YUV) → FFmpeg avcodec (libx264 NEON SW encode)
+```bash
+cmake -S . -B build-wsl -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON
+cmake --build build-wsl -j$(nproc)
+cd build-wsl && ctest --output-on-failure
 ```
 
-加密核心 `encryptFrame()` 未做任何改动。新增 `VPUDecoder` / `VPUEncoder` 两个类，接口贴近 OpenCV 以最小化调用方改动。
+结果：
 
----
+- 构建通过。
+- 15 个单元测试通过。
+- 60 帧端到端烟测通过：输入 60 帧，输出 60 帧，帧率保持 30 fps。
+- `-q 4` 场景下观察到队列峰值达到 4/4，说明有界队列背压生效。
+- 因 WSL 无 RK3588 VPU，编解码走软件回退路径。
 
-## A/B 性能对比
+## 4. RK3588 上板验证计划
 
-### 完整管线吞吐量 (fps)
+上板后执行：
 
-| 分辨率 | 线程数 | Master (OpenCV) | Feature (FFmpeg SW) | 提升 |
-|--------|-------|----------------|---------------------|------|
-| 720p | 4 | 59.8 fps | **107.5 fps** | **+80%** |
-| 1080p | 1 | 31.5 fps | **57.4 fps** | **+82%** |
-| 1080p | 4 | 31.0 fps | **58.2 fps** | **+88%** |
-| 1080p | 8 | 30.5 fps | **56.6 fps** | **+86%** |
-| 4K | 4 | 7.9 fps | **13.3 fps** | **+68%** |
-
-### 各阶段耗时 (1080p, 4 线程)
-
-| 阶段 | Master (OpenCV) | Feature (FFmpeg) | 改善 |
-|------|----------------|-------------------|------|
-| Reader (解码) | 9669 ms | 5060 ms | **1.9x** |
-| Encrypt (加密) | ~2 ms | ~0.2 ms | — |
-| Writer (编码) | 9676 ms | 5156 ms | **1.9x** |
-| **总耗时** | **9677 ms** | **5156 ms** | **1.88x** |
-
-### 纯加密性能（内存中，绕过编解码器）
-
-| 分辨率 | 1 线程 | 8 线程 |
-|--------|-------|--------|
-| 720p | 662 MB/s | 3116 MB/s |
-| 1080p | 834 MB/s | 3116 MB/s |
-| 4K | 808 MB/s | 3171 MB/s |
-
----
-
-## 瓶颈分析
-
-### Master 分支
-```
-管线耗时分布 (1080p):
-  Reader (libx264 SW decode):  ████████████████████████████████ ~97%
-  Encrypt (XOR):               ░ ~0.2%
-  Writer (libx264 SW encode):  ████████████████████████████████ ~97%
-  
-readQueue 峰值深度 = 1 → Reader 是绝对瓶颈
+```bash
+cd /home/xylon/workspace/VideoChaosCipher
+./scripts/inspect_codecs.sh
+cmake -S . -B build-wsl -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+cmake --build build-wsl -j$(nproc)
+cd build-wsl && ctest --output-on-failure
 ```
 
-### Feature 分支
-```
-管线耗时分布 (1080p):
-  Reader (FFmpeg SW decode):   ████████████████ ~49%
-  Encrypt (XOR):               ░ ~0.01%
-  Writer (libx264 SW encode):  █████████████████ ~51%
-  
-readQueue 峰值深度 = 1-2 → 瓶颈已部分从 Reader 转移到 Writer
+文件输入测试：
+
+```bash
+./build-wsl/video_encryptor input.mp4 output.mp4 0 5 -t 4 -q 16
 ```
 
-### 关键发现
+摄像头测试：
 
-1. **纯加密能力 3116 MB/s**，管线仅发挥 ~220 MB/s（仅 7%利用率）
-2. 瓶颈在编解码器，不在加密核心
-3. 增加加密线程数对整体吞吐量无帮助（管线被 I/O 限制）
+```bash
+./build-wsl/video_encryptor /dev/video0 camera_out.mp4 0 10 -t 4 -q 8
+```
 
----
+记录：
 
-## VPU 硬件加速现状
+| 指标 | 记录方式 |
+| --- | --- |
+| Decoder 是否硬件 | `[VPUDecoder] Opened: ... (HW=yes/no)` |
+| Encoder 是否硬件 | `[VPUEncoder] Opened: ... (HW=yes/no)` |
+| 处理 FPS | 程序统计输出 |
+| CPU 占用 | `top` / `htop` / `pidstat` |
+| 队列峰值 | 程序统计输出 |
+| 输出可播放性 | `ffprobe` / 播放器检查 |
 
-### 硬件可用性
+## 5. Benchmark 表格模板
 
-| 组件 | 设备节点 | 状态 |
-|------|---------|------|
-| VPU 解码器 | `/dev/video-dec0` | 存在 |
-| VPU 编码器 | `/dev/video-enc0` | 存在 |
-| MPP 服务 | `/dev/mpp_service` | 存在 |
-| RGA (2D加速) | `/dev/rga` | 存在 |
-| MPP 库 | `librockchip_mpp.so.1` | 已安装 |
-| RGA 库 | `librga.so` | 已安装 |
+上板后补充以下表格：
 
-### FFmpeg rkmpp 集成问题
+| 平台 | 输入 | 分辨率/FPS | 编解码器日志 | 线程数 | 队列容量 | 平均 FPS | CPU 占用 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| WSL | 测试视频 | 640x360/30 | HW=no/HW=no | 4 | 4 | 待记录 | 待记录 | 软件回退 |
+| RK3588 | H.264 文件 | 待记录 | 待记录 | 1 | 16 | 待记录 | 待记录 | 单线程基线 |
+| RK3588 | H.264 文件 | 待记录 | 待记录 | 4 | 16 | 待记录 | 待记录 | 多线程加密 |
+| RK3588 | 摄像头 | 待记录 | 待记录 | 4 | 8 | 待记录 | 待记录 | 实时采集 |
 
-| 组件 | FFmpeg 名称 | 状态 | 原因 |
-|------|-----------|------|------|
-| 解码器 | `h264_rkmpp` | **不可用** | `avcodec_open2` 成功但 `avcodec_receive_frame` 永远不产出帧 (FFmpeg 4.4 bug) |
-| 编码器 | `h264_v4l2m2m` | **不可用** | 找不到 V4L2 M2M 设备（此板通过 MPP 而非 V4L2 暴露 VPU） |
-| 编码器 | `h264_rkmpp` (encoder) | **不存在** | FFmpeg 4.4 未编译 rkmpp 编码器 wrapper |
+## 6. 历史性能记录说明
 
-### 可用的硬件加速路径
+旧版本曾记录过 FFmpeg 软件路径相对 OpenCV Video I/O 路径约 1.8x 的吞吐提升。该数据可以作为“历史优化方向”的参考，但不应直接写成当前最终性能结论。当前版本增加了硬件优先选择、有界队列和更完整统计，需要在同一输入、同一平台、同一线程数下重新跑 benchmark。
 
-1. **升级 FFmpeg 到 5.x+** — 新版修复了 rkmpp wrapper 的 bug
-2. **直接调用 MPP API** (`librockchip_mpp.so`) — 绕过 FFmpeg，直接使用 Rockchip 原生接口做硬解码/硬编码
-3. **配置内核 V4L2 M2M 驱动** — 使 VPU 以标准 V4L2 接口暴露，从而兼容 `h264_v4l2m2m`
+推荐简历写法：
 
----
+> 将视频 I/O 从 OpenCV 封装替换为 FFmpeg API，补充硬件优先编解码选择和软件回退机制，并通过端到端统计对 FPS、队列峰值和帧数一致性进行验证。
 
-## 修改文件清单
+不推荐写法：
 
-| 文件 | 变更类型 | 说明 |
-|------|---------|------|
-| `include/vpu_io.h` | 新增 | VPUDecoder / VPUEncoder 类声明 |
-| `src/vpu_io.cpp` | 新增 | FFmpeg 视频 I/O 实现（SW 解码/编码 + HW 自动探测/回退） |
-| `include/stats.h` | 新增 | FrameData + BenchStats 数据结构 |
-| `include/reader.h` | 新增 | readerThread 声明 |
-| `include/writer.h` | 新增 | writerThread 声明（含乱序重排） |
-| `include/pipeline.h` | 新增 | encryptThread + processVideo 声明 |
-| `src/reader.cpp` | 新增 | 帧读取线程实现 |
-| `src/writer.cpp` | 新增 | 帧写入线程实现（含 std::map 重排缓冲） |
-| `src/pipeline.cpp` | 新增 | 加密线程 + processVideo 流程编排 + 性能报告 |
-| `src/main.cpp` | 修改 | 参数解析精简至 ~50 行；`cv::VideoCapture` → `VPUDecoder`, `cv::VideoWriter` → `VPUEncoder` |
-| `CMakeLists.txt` | 修改 | 添加 `PkgConfig` 查找 libavcodec/format/util/swscale；添加新源文件 |
+> VPU 加速后固定提升 1.8 倍。
 
----
+## 7. 后续优化
 
-## 正确性验证
-
-| 测试项 | 结果 |
-|--------|------|
-| 内存级 Roundtrip (encryptFrame) | 最大像素差异 = 0（逐像素完美还原） |
-| 构建 (Release -O3) | 通过 |
-| test_frame 单帧质量评估 | 通过（熵 7.987, 相关性 ≈0, UACI 33.7%） |
-
----
-
-## 下一步建议
-
-| 优先级 | 方向 | 预期提升 |
-|--------|------|---------|
-| P0 | 直接集成 MPP API (`librockchip_mpp.so`) 做硬解码 | 管线吞吐提升 **5-10x** |
-| P1 | 集成 RGA (`librga.so`) 做硬件色彩空间转换 (NV12↔BGR) | 消除 sws_scale CPU 开销 |
-| P2 | 升级 FFmpeg 到 5.x 或 6.x 以修复 rkmpp wrapper | 简化集成路径 |
-| P3 | 无损编码器输出 (FFV1) 保证 roundtrip 正确性 | 质量保证 |
+1. 在 RK3588 上补齐硬件路径 benchmark。
+2. 如果 rkmpp wrapper 不稳定，评估直接接入 Rockchip MPP API。
+3. 为摄像头增加显式分辨率、fps、pixel format 配置。
+4. 增加 CSV benchmark 输出，便于画图和写简历量化结果。
+5. 增加无损/码流层加密模式，区分演示加扰和严格可逆归档。
